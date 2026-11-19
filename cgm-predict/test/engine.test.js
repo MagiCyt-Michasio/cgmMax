@@ -30,3 +30,14 @@ test('server health route reports package version consistently',()=>{
  assert.ok(src.includes("frontend:'"+pkg.version+"'"));
  assert.ok(src.includes('CGM Predict '+pkg.version+' listening'));
 });
+
+test('frontend inline script parses and backtest button calls its implementation',()=>{
+ const fs=require('node:fs'),vm=require('node:vm');
+ const html=fs.readFileSync(require.resolve('../public/index.html'),'utf8');
+ const scripts=[...html.matchAll(/<script>([\\s\\S]*?)<\\/script>/g)];
+ assert.ok(scripts.length>0,'inline frontend script exists');
+ for(const script of scripts)new vm.Script(script[1]);
+ assert.match(html,/id="runBacktestButton"/);
+ assert.match(html,/async function executeBacktest\\(/);
+ assert.match(html,/\\$\('runBacktestButton'\\)\\.addEventListener\\('click',executeBacktest\\)/);
+});
