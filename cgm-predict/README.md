@@ -1,24 +1,29 @@
 # CGM Predict — Nightscout Intelligence
 
-Version 0.1.0. Independent read-only Nightscout analytics PWA.
+Independent, read-only Nightscout analytics PWA. Current release: 0.1.0.
 
-## Scope
-- Separate module; does not modify the existing CGM monitor.
-- Node.js + Express API and responsive installable PWA.
-- MongoDB Nightscout collections: `entries`, `treatments`, and optional `profile`.
-- Hybrid forecast: short-horizon trend model + similarity to historical episodes.
-- Explicit stale-data detection, confidence intervals, and model limitations.
+## Install on Debian / Termux
 
-## Configuration
-Copy `.env.example` to `.env` and set `MONGODB_URI` and `MONGODB_DB=nightscout`. Use a read-only MongoDB account. Do not expose MongoDB publicly.
+Requires Node.js 20+, npm, git, and access to the Nightscout MongoDB listener.
 
-## Run
 ```bash
-npm install
-cp .env.example .env
+git clone https://github.com/MagiCyt-Michasio/cgmMax.git
+cd cgmMax/cgm-predict
+bash install-debian.sh
+```
+
+The installer preserves an existing local `.env`. Default local configuration targets MongoDB at `127.0.0.1:27018`, database `nightscout`. It does not change Nightscout, MongoDB, xdrip-monitor-ns, firewall rules, or public tunnel configuration.
+
+Use a MongoDB account restricted to read-only access to `nightscout`. The initial URI assumes MongoDB accepts local connections without authentication. If authentication is enabled, set the read-only user's URI locally in `.env`; never commit `.env` or paste credentials into chat. Do not expose MongoDB publicly.
+
+## Verify and start
+
+```bash
+node check-mongodb.js
 npm start
 ```
-Open `/` or install the PWA from the browser. API health: `/api/health`.
+
+Open `http://127.0.0.1:3060`. API health: `/api/health`.
 
 ## API
 - `GET /api/health`
@@ -27,14 +32,6 @@ Open `/` or install the PWA from the browser. API health: `/api/health`.
 - `GET /api/metrics?days=30`
 
 ## Prediction semantics
-Forecasts are experimental estimates, not guaranteed predictions and not instructions for insulin dosing or treatment. The UI reports stale data, data coverage, uncertainty, and model confidence. It does not autonomously recommend insulin or carbohydrate doses.
+The current forecast is a short-window linear trend estimate with a residual-based uncertainty interval. Historical episode comparison is a heuristic similarity baseline, not trained machine learning. IOB/COB, profile-aware pharmacodynamics, walk-forward backtesting, push notifications, and clinical-grade validation are not implemented.
 
-## Validation
-Use chronological holdout validation (train on earlier data, evaluate later periods). Report event sensitivity, precision, false alerts per day, lead time, and glucose forecast error separately. Never evaluate using randomly mixed future/past samples.
-
-
-## Current implementation status (v0.1.0)
-
-Implemented now: live SGV read API, read-only treatment retrieval, a simple short-window linear trend forecast with residual-based uncertainty band, nearest-pattern historical episode comparison, basic 30-day TIR summary, installable PWA shell, and unit tests.
-
-Not implemented yet: trained machine-learning model, insulin-on-board / carbs-on-board computation, profile-aware pharmacodynamic model, automated walk-forward backtest, push notifications, and clinical-grade validation. The historical comparison is a heuristic similarity baseline, not an ML-trained personalized model. Do not interpret the returned historical rate as an individual clinical probability.
+Forecasts are experimental, can be wrong, and are not instructions for insulin dosing or treatment. Do not use them to calculate doses or delay the established CGM response plan.
