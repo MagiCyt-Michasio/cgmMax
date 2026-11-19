@@ -31,3 +31,10 @@ Forecasts are experimental estimates, not guaranteed predictions and not instruc
 
 ## Validation
 Use chronological holdout validation (train on earlier data, evaluate later periods). Report event sensitivity, precision, false alerts per day, lead time, and glucose forecast error separately. Never evaluate using randomly mixed future/past samples.
+
+
+## Current implementation status (v0.1.0)
+
+Implemented now: live SGV read API, read-only treatment retrieval, a simple short-window linear trend forecast with residual-based uncertainty band, nearest-pattern historical episode comparison, basic 30-day TIR summary, installable PWA shell, and unit tests.
+
+Not implemented yet: trained machine-learning model, insulin-on-board / carbs-on-board computation, profile-aware pharmacodynamic model, automated walk-forward backtest, push notifications, and clinical-grade validation. The historical comparison is a heuristic similarity baseline, not an ML-trained personalized model. Do not interpret the returned historical rate as an individual clinical probability.
