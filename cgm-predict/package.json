@@ -1,8 +1,8 @@
 {
   "name": "cgm-predict-nightscout",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
-  "description": "Independent Nightscout analytics PWA",
+  "description": "Nightscout analytics with walk-forward validation",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
