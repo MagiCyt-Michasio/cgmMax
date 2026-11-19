@@ -1,40 +1,50 @@
-# CGM Predict — Nightscout Intelligence
+# CGM Predict 0.2 — WOW dashboard
 
-Independent, read-only Nightscout analytics PWA. Current release: 0.1.0.
+Independent read-only Nightscout analytics PWA.
 
-## Install on Debian / Termux
+## What's new in 0.2
+- Responsive dark intelligence dashboard.
+- Interactive glucose history chart with 6h / 12h / 24h / 3d / 7d selectors.
+- Short-horizon forecast chart with uncertainty bounds.
+- Time-of-day (24-hour) glucose profile.
+- TIR / low / high distribution, mean, median, min, max, standard deviation.
+- Data freshness and continuity indicators.
+- Recent Nightscout treatments/event timeline.
+- Correct null handling in historical episode analysis.
+- Forecast no longer extrapolates low-threshold crossing beyond a 120-minute display horizon.
+- Additional `/api/analytics` endpoint.
 
-Requires Node.js 20+, npm, git, and access to the Nightscout MongoDB listener.
+## Install / update
+
+In the existing checkout on Debian:
 
 ```bash
-cd ~
-git clone https://github.com/MagiCyt-Michasio/cgmMax.git
-cd cgmMax/cgm-predict
-bash install-debian.sh
+cd ~/cgmMax
+git pull --ff-only origin main
+cd cgm-predict
+npm install
 ```
 
-The installer runs inside the already-cloned project directory. It preserves an existing local `.env`. Default local configuration targets MongoDB at `127.0.0.1:27018`, database `nightscout`. It does not change Nightscout, MongoDB, xdrip-monitor-ns, firewall rules, or public tunnel configuration.
+For this feature branch, use `git fetch origin v0.2-wow` and `git checkout v0.2-wow` (or pull request merge after review).
 
-The default URI assumes MongoDB accepts local connections without authentication. If authentication is enabled, set an appropriately restricted read-only MongoDB user's URI locally in `.env`; never commit `.env` or paste credentials into chat. Do not expose MongoDB publicly.
+The app defaults to local MongoDB `127.0.0.1:27018`, database `nightscout`. Existing local `.env` is preserved. Never publish database credentials or expose MongoDB publicly.
 
-## Verify and start
+## Start
 
 ```bash
-node check-mongodb.js
 npm start
 ```
 
-Open `http://127.0.0.1:3060`. API health: `/api/health`.
+Open `http://127.0.0.1:3060`.
 
 ## API
-
 - `GET /api/health`
-- `GET /api/data?hours=72`
+- `GET /api/data?hours=24`
+- `GET /api/analytics?days=30`
 - `GET /api/predict`
 - `GET /api/metrics?days=30`
 
-## Prediction semantics
+## Model limitations
+The forecast remains a short-window linear trend baseline with an uncertainty interval. Similar-episode matching is a heuristic, not trained ML. IOB/COB, profile-aware pharmacodynamics, walk-forward backtesting, push notifications and clinical validation are not implemented.
 
-The current forecast is a short-window linear trend estimate with a residual-based uncertainty interval. Historical episode comparison is a heuristic similarity baseline, not trained machine learning. IOB/COB, profile-aware pharmacodynamics, walk-forward backtesting, push notifications, and clinical-grade validation are not implemented.
-
-Forecasts are experimental, can be wrong, and are not instructions for insulin dosing or treatment. Do not use them to calculate doses or delay the established CGM response plan.
+This is experimental analytics, not a medical device or a dosing tool. Do not use predictions to calculate insulin doses or delay the established CGM response plan.
