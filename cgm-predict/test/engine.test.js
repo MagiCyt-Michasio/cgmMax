@@ -22,4 +22,11 @@ test('walk-forward does not evaluate a tiny dataset',()=>{
  assert.equal(r.available,false);
 });
 
-test('server health route reports package version 0.4.0',()=>{const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync(require.resolve('../package.json'),'utf8'));assert.equal(pkg.version,'0.4.0');const src=fs.readFileSync(require.resolve('../server'),'utf8');assert.match(src,/version:'0\\.4\\.0'/);assert.match(src,/CGM Predict 0\\.4\\.0 listening/);});
+test('server health route reports package version consistently',()=>{
+ const fs=require('node:fs');
+ const pkg=JSON.parse(fs.readFileSync(require.resolve('../package.json'),'utf8'));
+ const src=fs.readFileSync(require.resolve('../server'),'utf8');
+ assert.ok(src.includes("version:'"+pkg.version+"'"));
+ assert.ok(src.includes("frontend:'"+pkg.version+"'"));
+ assert.ok(src.includes('CGM Predict '+pkg.version+' listening'));
+});
