@@ -4,7 +4,7 @@
   "private": true,
   "description": "Independent Nightscout-backed CGM prediction PWA",
   "main": "server.js",
-  "scripts": {"start": "node server.js", "test": "node --test"},
+  "scripts": {"start":"node server.js","test":"node --test","check:db":"node check-mongodb.js"},
   "engines": {"node": ">=20"},
-  "dependencies": {"dotenv": "^16.4.7", "express": "^4.21.2", "mongodb": "^6.12.0"}
+  "dependencies": {"dotenv":"^16.4.7","express":"^4.21.2","mongodb":"^6.12.0"}
 }
