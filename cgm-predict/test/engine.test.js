@@ -11,7 +11,11 @@ test('similarity returns valid result shape',()=>{const a=Array.from({length:160
 test('walk-forward backtest evaluates only historical cutoffs with future targets',()=>{
  const start=Date.UTC(2026,0,1),a=Array.from({length:400},(_,i)=>({t:start+i*5*60000,v:120+Math.sin(i/12)*10+i*.02}));
  const r=walkForwardBacktest(a,{stepMinutes:15});
- assert.equal(r.method,'walk-forward-linear-trend-v1');
+ assert.equal(r.method,'walk-forward-model-tournament-v1');
+ assert.ok(r.models.linear45[15].samples>0);
+ assert.ok(r.models.damped45[15].samples>0);
+ assert.ok(r.models.linear20[15].samples>0);
+ assert.ok(r.models.persistence[15].samples>0);
  assert.ok(r.horizons[15].samples>0);
  assert.ok(Number.isFinite(r.horizons[15].mae));
  assert.ok(Number.isFinite(r.horizons[15].baselineMae));
