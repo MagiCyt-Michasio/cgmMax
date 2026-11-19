@@ -1,6 +1,6 @@
 {
   "name": "cgm-predict-nightscout",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "description": "Nightscout analytics with walk-forward validation",
   "main": "server.js",
