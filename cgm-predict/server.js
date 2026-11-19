@@ -21,7 +21,7 @@ function walkForwardBacktest(entries, options={}) {
   const cutoff=entries[i],history=entries.slice(0,i+1);
   if(history.length<4){skipped++;continue;}
   const recent=history.filter(e=>cutoff.t-e.t<=45*60000);
-  if(recent.length<4||cutoff.t-recent[0].t<minHistoryMinutes*60000){skipped++;continue;}
+  if(recent.length<4||history[0].t>cutoff.t-minHistoryMinutes*60000){skipped++;continue;}
   const model=forecast(history);
   if(!model.available){skipped++;continue;}
   let used=false;
