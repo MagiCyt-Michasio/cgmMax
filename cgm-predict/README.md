@@ -1,22 +1,13 @@
-# CGM Predict 0.2 — WOW dashboard
+# CGM Predict 0.3 — 90-day analytics
 
-Independent read-only Nightscout analytics PWA.
+- 7 / 30 / 90 day selectors control summary statistics, hourly profile, glucose ranges and data-quality metrics.
+- Period comparison chart displays mean glucose and TIR over 7 / 30 / 90 days on separate axes.
+- Long gaps are counted only inside the selected analysis period.
+- Doughnut chart has no misleading numeric axes.
+- Existing detailed history selectors (6h / 12h / 24h / 3d / 7d) remain available.
+- Dashboard guide: [CO JA WIDZĘ?](docs/CO_JA_WIDZE.md).
 
-## What's new in 0.2
-- Responsive dark intelligence dashboard.
-- Interactive glucose history chart with 6h / 12h / 24h / 3d / 7d selectors.
-- Short-horizon forecast chart with uncertainty bounds.
-- Time-of-day (24-hour) glucose profile.
-- TIR / low / high distribution, mean, median, min, max, standard deviation.
-- Data freshness and continuity indicators.
-- Recent Nightscout treatments/event timeline.
-- Correct null handling in historical episode analysis.
-- Forecast no longer extrapolates low-threshold crossing beyond a 120-minute display horizon.
-- Additional `/api/analytics` endpoint.
-
-## Install / update
-
-In the existing checkout on Debian:
+## Debian update
 
 ```bash
 cd ~/cgmMax
@@ -25,26 +16,15 @@ cd cgm-predict
 npm install
 ```
 
-For this feature branch, use `git fetch origin v0.2-wow` and `git checkout v0.2-wow` (or pull request merge after review).
-
-The app defaults to local MongoDB `127.0.0.1:27018`, database `nightscout`. Existing local `.env` is preserved. Never publish database credentials or expose MongoDB publicly.
-
-## Start
-
-```bash
-npm start
-```
-
-Open `http://127.0.0.1:3060`.
+Restart the CGM Predict process and reload the browser page. Existing local `.env` is preserved.
 
 ## API
 - `GET /api/health`
 - `GET /api/data?hours=24`
-- `GET /api/analytics?days=30`
+- `GET /api/analytics?days=90`
 - `GET /api/predict`
-- `GET /api/metrics?days=30`
+- `GET /api/metrics?days=90`
 
-## Model limitations
-The forecast remains a short-window linear trend baseline with an uncertainty interval. Similar-episode matching is a heuristic, not trained ML. IOB/COB, profile-aware pharmacodynamics, walk-forward backtesting, push notifications and clinical validation are not implemented.
+The TIR value is based on the share of readings, not a time-weighted reconstruction. The short-term forecast remains a linear trend baseline, not trained ML. Similar-episode matching remains heuristic. IOB/COB, profile-aware pharmacodynamics, walk-forward and clinical validation are not implemented.
 
-This is experimental analytics, not a medical device or a dosing tool. Do not use predictions to calculate insulin doses or delay the established CGM response plan.
+CGM Predict is experimental analytics, not a medical device or dosing tool. Do not use predictions to calculate insulin doses or delay established CGM alarms and care plans.
