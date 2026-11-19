@@ -12,29 +12,82 @@ const entryTime=d=>num(d.date)??(d.dateString?Date.parse(d.dateString):null);
 function cleanEntries(rows){return rows.map(x=>({t:entryTime(x),v:num(x.sgv)})).filter(x=>Number.isFinite(x.t)&&Number.isFinite(x.v)&&x.v>0&&x.v<1000).sort((a,b)=>a.t-b.t);}
 function median(a){if(!a.length)return null;const s=[...a].sort((x,y)=>x-y),m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;}
 function linearFit(p){const mx=p.reduce((s,x)=>s+x.x,0)/p.length,my=p.reduce((s,x)=>s+x.y,0)/p.length,d=p.reduce((s,x)=>s+(x.x-mx)**2,0),slope=d?p.reduce((s,x)=>s+(x.x-mx)*(x.y-my),0)/d:0;return{slope,intercept:my-slope*mx};}
+function windowSlope(entries,minutes){
+ const latest=entries.at(-1);if(!latest)return null;
+ const points=entries.filter(e=>latest.t-e.t<=minutes*60000);
+ if(points.length<3)return null;
+ const fit=linearFit(points.map(e=>({x:(e.t-points[0].t)/60000,y:e.v})));
+ return Number.isFinite(fit.slope)?fit.slope:null;
+}
+function medianSlope(entries,minutes=45){
+ const latest=entries.at(-1);if(!latest)return null;
+ const points=entries.filter(e=>latest.t-e.t<=minutes*60000),slopes=[];
+ for(let i=0;i<points.length;i++)for(let j=i+1;j<points.length;j++){
+  const dt=(points[j].t-points[i].t)/60000;
+  if(dt>=2)slopes.push((points[j].v-points[i].v)/dt);
+ }
+ return slopes.length?median(slopes):null;
+}
+function extractFeatures(entries,now=Date.now()){
+ const latest=entries.at(-1)||null,recent=latest?entries.filter(e=>latest.t-e.t<=45*60000):[];
+ const s10=windowSlope(entries,10),s20=windowSlope(entries,20),s45=windowSlope(entries,45);
+ const signs=[s10,s20,s45].filter(v=>v!==null&&Math.abs(v)>.02).map(Math.sign);
+ const direction=signs.length<2?'insufficient':signs.every(x=>x===signs[0])?'consistent':'mixed';
+ const vals=recent.map(x=>x.v),mean=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
+ const volatility=mean===null?null:Math.sqrt(vals.reduce((sum,v)=>sum+(v-mean)**2,0)/vals.length);
+ const gaps=[];for(let i=1;i<recent.length;i++)gaps.push((recent[i].t-recent[i-1].t)/60000);
+ return {
+  latest:latest?{value:latest.v,timestamp:latest.t,ageMinutes:Math.max(0,Math.round((now-latest.t)/60000))}:null,
+  samples10m:entries.filter(e=>latest&&latest.t-e.t<=10*60000).length,
+  samples20m:entries.filter(e=>latest&&latest.t-e.t<=20*60000).length,
+  samples45m:recent.length,
+  velocity:{m10:s10===null?null:Number(s10.toFixed(3)),m20:s20===null?null:Number(s20.toFixed(3)),m45:s45===null?null:Number(s45.toFixed(3))},
+  acceleration:s10===null||s45===null?null:Number(((s10-s45)/17.5).toFixed(4)),
+  directionAgreement:direction,
+  volatility:volatility===null?null:Number(volatility.toFixed(1)),
+  medianGapMinutes:median(gaps),
+  maxGapMinutes:gaps.length?Math.max(...gaps):null,
+  fresh:!!latest&&now-latest.t<=STALE_MIN*60000
+ };
+}
+function robustSlope(entries){const value=medianSlope(entries,45);return value===null?0:Math.max(-5,Math.min(5,value));}
+function candidatePredictions(history,cutoff){
+ const latest45=history.filter(e=>cutoff.t-e.t<=45*60000),latest20=history.filter(e=>cutoff.t-e.t<=20*60000),latest10=history.filter(e=>cutoff.t-e.t<=10*60000);
+ const fit=(points)=>points.length>=3?linearFit(points.map(e=>({x:(e.t-points[0].t)/60000,y:e.v}))).slope:0;
+ const s45=Math.max(-5,Math.min(5,fit(latest45)));
+ const s20=Math.max(-5,Math.min(5,fit(latest20.length>=3?latest20:latest45)));
+ const s10=Math.max(-5,Math.min(5,fit(latest10.length>=3?latest10:latest20)));
+ const robust=robustSlope(latest45),accel=Math.max(-.08,Math.min(.08,(s10-s45)/17.5));
+ const signs=[s10,s20,s45].filter(x=>Math.abs(x)>.02).map(Math.sign);
+ const consistent=signs.length>=2&&signs.every(x=>x===signs[0]);
+ const adaptive=consistent?(s10*.5+s20*.3+s45*.2):(s20*.2+s45*.1);
+ return {
+  linear45:h=>cutoff.v+s45*h,
+  damped45:h=>cutoff.v+s45*h*(h<=15?.7:h<=30?.45:.25),
+  linear20:h=>cutoff.v+s20*h,
+  acceleration:h=>cutoff.v+s20*h+Math.max(-18,Math.min(18,.5*accel*h*h)),
+  robust45:h=>cutoff.v+robust*h,
+  adaptive:h=>cutoff.v+adaptive*h*(h<=15?.85:h<=30?.55:.3),
+  persistence:h=>cutoff.v
+ };
+}
 function forecast(entries){const now=entries.at(-1),recent=entries.filter(e=>now.t-e.t<=45*60000);if(recent.length<4)return{available:false,reason:'Za mało świeżych punktów do prognozy.'};const x0=recent[0].t,fit=linearFit(recent.map(e=>({x:(e.t-x0)/60000,y:e.v}))),slope=Math.max(-5,Math.min(5,fit.slope)),residual=Math.sqrt(recent.reduce((s,e)=>s+(e.v-(fit.intercept+fit.slope*((e.t-x0)/60000)))**2,0)/recent.length),horizons=[15,30,45,60].map(minutes=>{const raw=now.v+slope*minutes,band=1.96*residual;return{minutes,value:Math.round(Math.max(20,Math.min(600,raw))),low:Math.round(Math.max(20,raw-band)),high:Math.round(Math.min(600,raw+band))};}),t70=slope<-.03?(now.v-70)/Math.abs(slope):null;return{available:true,current:now.v,slopePerMinute:Number(slope.toFixed(3)),horizons,residual:Number(residual.toFixed(1)),timeTo70:t70!==null&&t70>0&&t70<=120?Math.round(t70):null,method:'linear-trend-45m',confidence:recent.length>=8&&residual<15?'moderate':'low',sampleCount:recent.length};}
 
 function walkForwardBacktest(entries, options={}) {
  const horizons=options.horizons||[15,30,60],stepMinutes=Math.max(5,Math.min(60,options.stepMinutes||15));
- const maxSamples=options.maxSamples||1500, names=['linear45','damped45','linear20','persistence'];
+ const maxSamples=options.maxSamples||1500,names=['linear45','damped45','linear20','acceleration','robust45','adaptive','persistence'];
  const results=Object.fromEntries(names.map(name=>[name,Object.fromEntries(horizons.map(h=>[h,[]]))]));
  let evaluated=0,skipped=0,lastCutoff=-Infinity;
  for(let i=0;i<entries.length;i++){
-  const cutoff=entries[i];
-  if(cutoff.t-lastCutoff<stepMinutes*60000)continue;
-  const history=entries.slice(0,i+1),recent45=history.filter(e=>cutoff.t-e.t<=45*60000),recent20=history.filter(e=>cutoff.t-e.t<=20*60000);
-  if(recent45.length<4||history[0].t>cutoff.t-60*60000){skipped++;continue;}
-  const fit45=linearFit(recent45.map(e=>({x:(e.t-recent45[0].t)/60000,y:e.v})));
-  const fit20=recent20.length>=3?linearFit(recent20.map(e=>({x:(e.t-recent20[0].t)/60000,y:e.v}))):fit45;
-  const slope45=Math.max(-5,Math.min(5,fit45.slope)),slope20=Math.max(-5,Math.min(5,fit20.slope));
-  const predictions={linear45:h=>cutoff.v+slope45*h,damped45:h=>cutoff.v+slope45*h*(h<=15?.7:h<=30?.45:.25),linear20:h=>cutoff.v+slope20*h,persistence:h=>cutoff.v};
-  let used=false;
+  const cutoff=entries[i];if(cutoff.t-lastCutoff<stepMinutes*60000)continue;
+  const history=entries.slice(0,i+1),recent=history.filter(e=>cutoff.t-e.t<=45*60000);
+  if(recent.length<4||history[0].t>cutoff.t-60*60000){skipped++;continue;}
+  const predictions=candidatePredictions(history,cutoff);let used=false;
   for(const horizon of horizons){
    const target=entries.find(e=>e.t>=cutoff.t+horizon*60000&&e.t<=cutoff.t+(horizon+7)*60000);
    if(!target)continue;
    for(const name of names){
-    const predicted=Math.round(Math.max(20,Math.min(600,predictions[name](horizon))));
-    const error=predicted-target.v;
+    const predicted=Math.round(Math.max(20,Math.min(600,predictions[name](horizon)))),error=predicted-target.v;
     results[name][horizon].push({predicted,actual:target.v,error,absError:Math.abs(error),cutoff:cutoff.t});
    }
    used=true;
@@ -50,39 +103,58 @@ function walkForwardBacktest(entries, options={}) {
    models[name][horizon]=n?{
     samples:n,
     mae:Number((a.reduce((sum,x)=>sum+x.absError,0)/n).toFixed(2)),
-    rmse:Number(Math.sqrt(a.reduce((sum,x)=>sum=>sum,0)/n).toFixed(2))
-   }:{samples:0,mae:null,rmse:null};
-   if(n){
-    models[name][horizon].rmse=Number(Math.sqrt(a.reduce((sum,x)=>sum+x.error*x.error,0)/n).toFixed(2));
-    models[name][horizon].bias=Number((a.reduce((sum,x)=>sum+x.error,0)/n).toFixed(2));
-   }
+    rmse:Number(Math.sqrt(a.reduce((sum,x)=>sum+x.error*x.error,0)/n).toFixed(2)),
+    bias:Number((a.reduce((sum,x)=>sum+x.error,0)/n).toFixed(2))
+   }:{samples:0,mae:null,rmse:null,bias:null};
   }
  }
  const summary={};
  for(const horizon of horizons){
-  const m=models.linear45[horizon],base=models.persistence[horizon];
-  summary[horizon]={...m,baselineMae:base.mae,baselineSamples:base.samples};
+  const base=models.persistence[horizon],champions=names.filter(n=>n!=='persistence').map(name=>({name,mae:models[name][horizon].mae})).filter(x=>Number.isFinite(x.mae)).sort((a,b)=>a.mae-b.mae);
+  summary[horizon]={...models.linear45[horizon],baselineMae:base.mae,baselineSamples:base.samples,bestModel:champions[0]?.name||null,bestMae:champions[0]?.mae??null};
  }
- return {available:Object.values(summary).some(x=>x.samples>0),method:'walk-forward-model-tournament-v1',stepMinutes,horizons:summary,models,totalRows:entries.length,evaluatedCutoffs:evaluated,skippedCutoffs:skipped,notes:'All candidate models use only readings available at each historical cutoff. Persistence is the baseline. Targets are the first sample in the horizon window +0..7 minutes.'};
+ return {available:Object.values(summary).some(x=>x.samples>0),method:'walk-forward-adaptive-tournament-v2',stepMinutes,horizons:summary,models,totalRows:entries.length,evaluatedCutoffs:evaluated,skippedCutoffs:skipped,notes:'Candidate models use only readings available at each cutoff. Includes velocity, acceleration, robust slope and adaptive blending. Persistence is baseline. Targets are the first sample in horizon +0..7 min.'};
 }
 function historicalSimilarity(entries){const current=entries.slice(-6);if(current.length<6||entries.length<60)return{available:false,reason:'Za mało historii do porównania epizodów.'};const vector=current.map(e=>e.v),episodes=[];for(let i=30;i<entries.length-18;i++){const c=entries.slice(i-6,i);if(c.length!==6)continue;const gap=entries[i-1].t-entries[i-6].t;if(gap>50*60000||gap<15*60000)continue;const distance=Math.sqrt(c.reduce((s,e,j)=>s+(e.v-vector[j])**2,0)/6);if(distance<35){const f=entries.slice(i,i+12);episodes.push({distance,minimum:Math.min(...f.map(e=>e.v)),change:f.at(-1).v-c[5]});}}episodes.sort((a,b)=>a.distance-b.distance);const best=episodes.slice(0,20);if(best.length<5)return{available:false,reason:'Znaleziono mniej niż pięć podobnych epizodów.'};return{available:true,samples:best.length,similarHypoRate:Math.round(best.filter(e=>e.minimum<70).length/best.length*100),medianFutureChange:median(best.map(e=>e.change)),medianFutureMinimum:median(best.map(e=>e.minimum))};}
 function aggregate(entries){const v=entries.map(e=>e.v);if(!v.length)return{readings:0,mean:null,median:null,min:null,max:null,below70:null,range70to180:null,above180:null,sd:null};const mean=v.reduce((a,b)=>a+b,0)/v.length,variance=v.reduce((s,x)=>s+(x-mean)**2,0)/v.length;return{readings:v.length,mean:Math.round(mean),median:Math.round(median(v)),min:Math.min(...v),max:Math.max(...v),below70:Math.round(v.filter(x=>x<70).length/v.length*100),range70to180:Math.round(v.filter(x=>x>=70&&x<=180).length/v.length*100),above180:Math.round(v.filter(x=>x>180).length/v.length*100),sd:Math.round(Math.sqrt(variance))};}
 function dayProfile(entries){const a=Array.from({length:24},()=>({sum:0,count:0,low:0,high:0}));for(const e of entries){const s=a[new Date(e.t).getHours()];s.sum+=e.v;s.count++;if(e.v<70)s.low++;if(e.v>180)s.high++;}return a.map((s,h)=>({hour:h,mean:s.count?Math.round(s.sum/s.count):null,readings:s.count,below70:s.count?Math.round(s.low/s.count*100):null,above180:s.count?Math.round(s.high/s.count*100):null}));}
 function quality(entries,latest,now=Date.now()){const gaps=[];for(let i=1;i<entries.length;i++)gaps.push((entries[i].t-entries[i-1].t)/60000);const valid=gaps.filter(x=>x>0&&x<360);return{stale:!latest||now-latest.t>STALE_MIN*60000,minutesSinceLatest:latest?Math.max(0,Math.round((now-latest.t)/60000)):null,medianIntervalMinutes:median(valid),longGaps:valid.filter(x=>x>15).length,coveragePercent:entries.length?Math.round(valid.filter(x=>x<=10).length/Math.max(1,entries.length-1)*100):0};}
-app.get('/api/health',(req,res)=>res.json({ok:!!db,service:'cgm-predict',version:'0.4.2',database:DB_NAME,frontend:'0.4.2'}));
+app.get('/api/health',(req,res)=>res.json({ok:!!db,service:'cgm-predict',version:'0.5.0',database:DB_NAME,frontend:'0.5.0'}));
 app.get('/api/diagnostics',async(req,res)=>{
- if(!db)return res.status(503).json({ok:false,version:'0.4.2',databaseConnected:false});
+ if(!db)return res.status(503).json({ok:false,version:'0.5.0',databaseConnected:false});
  try{
   const [count,latest]=await Promise.all([
    db.collection('entries').countDocuments({type:'sgv',sgv:{$type:'number'}}),
    db.collection('entries').find({type:'sgv',sgv:{$type:'number'}}).sort({date:-1}).limit(1).next()
   ]);
-  res.json({ok:true,version:'0.4.2',database:DB_NAME,databaseConnected:true,sgvCount:count,latest:latest?{sgv:latest.sgv,date:latest.date,dateString:latest.dateString}:null,latestAgeMinutes:latest?Math.max(0,Math.round((Date.now()-latest.date)/60000)):null});
- }catch(e){console.error(e);res.status(500).json({ok:false,version:'0.4.2',error:'Diagnostics query failed'});}
+  res.json({ok:true,version:'0.5.0',database:DB_NAME,databaseConnected:true,sgvCount:count,latest:latest?{sgv:latest.sgv,date:latest.date,dateString:latest.dateString}:null,latestAgeMinutes:latest?Math.max(0,Math.round((Date.now()-latest.date)/60000)):null});
+ }catch(e){console.error(e);res.status(500).json({ok:false,version:'0.5.0',error:'Diagnostics query failed'});}
 });
 app.get('/api/data',async(req,res)=>{if(!db)return res.status(503).json({error:'Database unavailable'});try{const hours=Math.max(1,Math.min(8760,Number(req.query.hours)||24)),cutoff=Date.now()-hours*3600000;const [raw,t]=await Promise.all([db.collection('entries').find({type:'sgv',date:{$gte:cutoff},sgv:{$type:'number'}}).sort({date:1}).toArray(),db.collection('treatments').find({$or:[{timestamp:{$gte:cutoff}},{created_at:{$gte:new Date(cutoff).toISOString()}}]}).sort({timestamp:1}).limit(1000).toArray()]);const entries=cleanEntries(raw),latest=entries.at(-1)||null;res.json({hours,entries,latest,stale:!latest||Date.now()-latest.t>STALE_MIN*60000,quality:quality(entries,latest),treatments:t.map(x=>({timestamp:num(x.timestamp)||Date.parse(x.created_at||''),insulin:num(x.insulin),carbs:num(x.carbs),eventType:x.eventType||'',notes:x.notes||'',enteredBy:x.enteredBy||''})).filter(x=>Number.isFinite(x.timestamp))});}catch(e){console.error(e);res.status(500).json({error:'Nightscout read failed'});}});
 app.get('/api/analytics',async(req,res)=>{if(!db)return res.status(503).json({error:'Database unavailable'});try{const days=Math.max(1,Math.min(365,Number(req.query.days)||30)),cutoff=Date.now()-days*86400000,raw=await db.collection('entries').find({type:'sgv',date:{$gte:cutoff},sgv:{$type:'number'}}).sort({date:1}).toArray(),entries=cleanEntries(raw);res.json({days,summary:aggregate(entries),hourly:dayProfile(entries),quality:quality(entries,entries.at(-1)||null)});}catch(e){console.error(e);res.status(500).json({error:'Analytics failed'});}});
 app.get('/api/predict',async(req,res)=>{if(!db)return res.status(503).json({error:'Database unavailable'});try{const rows=await db.collection('entries').find({type:'sgv',sgv:{$type:'number'}}).sort({date:-1}).limit(1200).toArray(),entries=cleanEntries(rows.reverse()),latest=entries.at(-1)||null;if(!latest)return res.json({available:false,reason:'No glucose data'});if(Date.now()-latest.t>STALE_MIN*60000)return res.json({available:false,stale:true,reason:'Ostatni odczyt jest nieaktualny.'});res.json({generatedAt:Date.now(),forecast:forecast(entries),historical:historicalSimilarity(entries),dataPoints:entries.length});}catch(e){console.error(e);res.status(500).json({error:'Prediction failed'});}});
+app.get('/api/features',async(req,res)=>{
+ if(!db)return res.status(503).json({error:'Database unavailable'});
+ try{
+  const since45=Date.now()-45*60000,since24=Date.now()-86400000;
+  const [rows,treatments]=await Promise.all([
+   db.collection('entries').find({type:'sgv',date:{$gte:since45},sgv:{$type:'number'}}).sort({date:1}).limit(500).toArray(),
+   db.collection('treatments').find({$or:[{timestamp:{$gte:since24}},{created_at:{$gte:new Date(since24).toISOString()}}]}).sort({timestamp:-1}).limit(1000).toArray()
+  ]);
+  const events=treatments.map(x=>({insulin:num(x.insulin),carbs:num(x.carbs)}));
+  res.json({
+   generatedAt:Date.now(),glucose:extractFeatures(cleanEntries(rows)),
+   context:{treatmentEvents24h:events.length,insulinEvents24h:events.filter(x=>x.insulin!==null&&x.insulin>0).length,carbEvents24h:events.filter(x=>x.carbs!==null&&x.carbs>0).length},
+   availability:{
+    glucoseTrend:true,acceleration:true,measurementContinuity:true,
+    insulinEvents:events.some(x=>x.insulin!==null&&x.insulin>0),
+    carbohydrateEvents:events.some(x=>x.carbs!==null&&x.carbs>0),
+    iob:false,cob:false,activity:false,heartRate:false
+   },
+   limitations:{iobCob:'Nieobliczane: brak zweryfikowanego profilu insuliny, czasu działania i reguł absorpcji węglowodanów.',activity:'Brak podłączonego, zweryfikowanego źródła aktywności.',heartRate:'Brak podłączonego źródła tętna.'}
+  });
+ }catch(e){console.error(e);res.status(500).json({error:'Feature audit failed'});}
+});
 app.get('/api/backtest',async(req,res)=>{
  if(!db)return res.status(503).json({error:'Database unavailable'});
  try{
@@ -93,6 +165,6 @@ app.get('/api/backtest',async(req,res)=>{
  }catch(e){console.error(e);res.status(500).json({error:'Backtest failed'});}
 });
 app.get('/api/metrics',async(req,res)=>{if(!db)return res.status(503).json({error:'Database unavailable'});try{const days=Math.max(1,Math.min(365,Number(req.query.days)||30)),raw=await db.collection('entries').find({type:'sgv',date:{$gte:Date.now()-days*86400000},sgv:{$type:'number'}}).toArray();res.json({days,...aggregate(cleanEntries(raw))});}catch(e){console.error(e);res.status(500).json({error:'Metrics failed'});}});
-async function start(){if(!URI)throw new Error('MONGODB_URI is required');mongo=new MongoClient(URI,{maxPoolSize:5,serverSelectionTimeoutMS:5000});await mongo.connect();db=mongo.db(DB_NAME);await db.command({ping:1});app.listen(PORT,'0.0.0.0',()=>console.log('CGM Predict 0.4.2 listening on '+PORT));}
+async function start(){if(!URI)throw new Error('MONGODB_URI is required');mongo=new MongoClient(URI,{maxPoolSize:5,serverSelectionTimeoutMS:5000});await mongo.connect();db=mongo.db(DB_NAME);await db.command({ping:1});app.listen(PORT,'0.0.0.0',()=>console.log('CGM Predict 0.5.0 listening on '+PORT));}
 if(require.main===module)start().catch(e=>{console.error(e);process.exit(1)});
-module.exports={cleanEntries,linearFit,forecast,historicalSimilarity,aggregate,dayProfile,quality,walkForwardBacktest,app};
+module.exports={cleanEntries,linearFit,forecast,historicalSimilarity,aggregate,dayProfile,quality,windowSlope,medianSlope,extractFeatures,walkForwardBacktest,app};

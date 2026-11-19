@@ -1,8 +1,8 @@
 {
   "name": "cgm-predict-nightscout",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "private": true,
-  "description": "Nightscout analytics with walk-forward validation",
+  "description": "Nightscout analytics with adaptive walk-forward prediction research",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
