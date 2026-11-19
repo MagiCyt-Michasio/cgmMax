@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict');
-const {cleanEntries,linearFit,forecast,historicalSimilarity,aggregate,dayProfile,quality,walkForwardBacktest}=require('../server');
+const {cleanEntries,linearFit,forecast,historicalSimilarity,aggregate,dayProfile,quality,windowSlope,medianSlope,extractFeatures,walkForwardBacktest}=require('../server');
 test('cleanEntries filters invalid readings and sorts',()=>assert.deepEqual(cleanEntries([{date:2,sgv:90},{date:1,sgv:null},{date:3,sgv:110}]).map(x=>x.v),[90,110]));
 test('linearFit recovers slope',()=>assert.equal(linearFit([{x:0,y:100},{x:1,y:98},{x:2,y:96}]).slope,-2));
 test('forecast requires four recent points',()=>assert.equal(forecast([{t:1,v:100},{t:2,v:99}]).available,false));
@@ -11,7 +11,10 @@ test('similarity returns valid result shape',()=>{const a=Array.from({length:160
 test('walk-forward backtest evaluates only historical cutoffs with future targets',()=>{
  const start=Date.UTC(2026,0,1),a=Array.from({length:400},(_,i)=>({t:start+i*5*60000,v:120+Math.sin(i/12)*10+i*.02}));
  const r=walkForwardBacktest(a,{stepMinutes:15});
- assert.equal(r.method,'walk-forward-model-tournament-v1');
+ assert.equal(r.method,'walk-forward-adaptive-tournament-v2');
+ assert.ok(r.models.acceleration[15].samples>0);
+ assert.ok(r.models.robust45[15].samples>0);
+ assert.ok(r.models.adaptive[15].samples>0);
  assert.ok(r.models.linear45[15].samples>0);
  assert.ok(r.models.damped45[15].samples>0);
  assert.ok(r.models.linear20[15].samples>0);
@@ -45,4 +48,21 @@ test('frontend inline script parses and backtest button calls its implementation
  assert.ok(html.includes('id="runBacktestButton"'));
  assert.ok(html.includes('async function executeBacktest(){'));
  assert.ok(html.includes("$('runBacktestButton').addEventListener('click',executeBacktest)"));
+});
+
+test('feature extraction reports velocity acceleration and direction state',()=>{
+ const start=Date.UTC(2026,0,1);
+ const a=Array.from({length:20},(_,i)=>({t:start+i*3*60000,v:120+i*1.5}));
+ const f=extractFeatures(a,start+57*60000);
+ assert.equal(f.samples45m,16);
+ assert.ok(Number.isFinite(f.velocity.m45));
+ assert.ok(Number.isFinite(f.acceleration));
+ assert.equal(f.directionAgreement,'consistent');
+ assert.equal(typeof f.fresh,'boolean');
+});
+test('robust median slope resists one extreme reading',()=>{
+ const start=Date.UTC(2026,0,1);
+ const a=Array.from({length:10},(_,i)=>({t:start+i*5*60000,v:100+i*2}));
+ a[8].v=250;
+ assert.ok(Math.abs(medianSlope(a,45)-.4)<1);
 });
