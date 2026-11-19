@@ -29,6 +29,7 @@ function renderForecast(f){if(!f?.available){setText('modelnote',f?.reason||'Bra
 function renderAnalytics(a){const s=a.summary,q=a.quality;for(const [id,v] of Object.entries({mean:fmt(s.mean),tir:fmt(s.range70to180,'%'),low:fmt(s.below70,'%'),high:fmt(s.above180,'%'),median:fmt(s.median),min:fmt(s.min),max:fmt(s.max),count:fmt(s.readings),variability:fmt(s.sd)}))setText(id,v);setText('age',q.minutesSinceLatest===null?'—':q.minutesSinceLatest+' min');setText('interval',q.medianIntervalMinutes===null?'—':q.medianIntervalMinutes.toFixed(1)+' min');setText('gaps',q.longGaps);setText('coverage2',q.coveragePercent+'%');setText('coverage',q.coveragePercent+'%');setText('freshness',q.stale?'pomiar nieaktualny':'ciągłość pomiarów');setText('qualityState',q.stale?'NIEAKTUALNE':'monitorowane');draw('hourChart','bar',{labels:a.hourly.map(x=>String(x.hour).padStart(2,'0')+':00'),datasets:[{label:'Średnia mg/dL',data:a.hourly.map(x=>x.mean),backgroundColor:'#5ba8edaa',borderRadius:5}]});draw('rangeChart','doughnut',{labels:['Poniżej 70','70–180','Powyżej 180'],datasets:[{data:[s.below70??0,s.range70to180??0,s.above180??0],backgroundColor:['#ff6d83','#35d69a','#ffcf70'],borderColor:'#0c1724',borderWidth:3}]},{cutout:'68%',plugins:{legend:{position:'bottom',labels:{color:'#9eb2c8',padding:14,font:{size:10}}}}});$('rangeLegend').innerHTML=[['Poniżej 70',s.below70],['70–180',s.range70to180],['Powyżej 180',s.above180]].map(([n,v])=>'<div class="row"><span class="muted">'+n+'</span><b>'+fmt(v,'%')+'</b></div>').join('');setText('hourPeriod',days+' dni');setText('rangePeriod',days+' dni')}
 function renderCompare(a){draw('compareChart','bar',{labels:['7 dni','30 dni','90 dni'],datasets:[{label:'Średnia mg/dL',data:a.map(x=>x.summary.mean),backgroundColor:'#59a6e8bb',yAxisID:'y'},{label:'TIR %',data:a.map(x=>x.summary.range70to180),backgroundColor:'#35d69aaa',yAxisID:'y1'}]},{scales:{x:base.scales.x,y:{...base.scales.y,position:'left',title:{display:true,text:'mg/dL',color:'#9eb2c8'}},y1:{position:'right',min:0,max:100,grid:{drawOnChartArea:false},ticks:{color:'#7f94ab'},title:{display:true,text:'%',color:'#9eb2c8'}}}})}
 
+function bestName(name){return ({linear45:'Trend 45 min',damped45:'Trend tłumiony',linear20:'Trend 20 min'})[name]||name||''}
 async function executeBacktest(){
  const button=$('runBacktestButton');
  const note=$('backtestNote');
@@ -48,17 +49,17 @@ async function executeBacktest(){
   setText('bt60',Number.isFinite(horizons[2].mae)?horizons[2].mae.toFixed(1):'—');
   setText('btSamples',String(total));
   const labels=horizons.map(item=>item.minutes+' min');
-  draw('backtestChart','bar',{labels,datasets:[
-   {label:'CGM Predict · MAE',data:horizons.map(x=>Number.isFinite(x.mae)?x.mae:null),backgroundColor:'#59a6e8cc',borderRadius:5},
-   {label:'Baseline · MAE',data:horizons.map(x=>Number.isFinite(x.baselineMae)?x.baselineMae:null),backgroundColor:'#ffcf70bb',borderRadius:5}
-  ]});
+  const modelNames=['linear45','damped45','linear20','persistence'];
+  const modelLabels={linear45:'Trend 45 min',damped45:'Trend tłumiony',linear20:'Trend 20 min',persistence:'Baseline'};
+  const colors={linear45:'#59a6e8cc',damped45:'#35d69acc',linear20:'#b58be8cc',persistence:'#ffcf70bb'};
+  draw('backtestChart','bar',{labels,datasets:modelNames.map(name=>({label:modelLabels[name],data:horizons.map(x=>result.models?.[name]?.[String(x.minutes)]?.mae??null),backgroundColor:colors[name],borderRadius:5}))});
   $('backtestRows').innerHTML=horizons.map(x=>{
    const beats=Number.isFinite(x.mae)&&Number.isFinite(x.baselineMae)&&x.mae<x.baselineMae;
    const delta=Number.isFinite(x.mae)&&Number.isFinite(x.baselineMae)?(x.mae-x.baselineMae):null;
    return '<div class="row"><span class="muted">'+x.minutes+' min · '+(x.samples||0)+' prób</span><b>MAE '+(Number.isFinite(x.mae)?x.mae.toFixed(2):'—')+' · baseline '+(Number.isFinite(x.baselineMae)?x.baselineMae.toFixed(2):'—')+(delta===null?'':' · '+(delta>0?'+':'')+delta.toFixed(2))+' mg/dL'+(beats?' · lepiej':'')+'</b></div>';
   }).join('');
-  const wins=horizons.filter(x=>Number.isFinite(x.mae)&&Number.isFinite(x.baselineMae)&&x.mae<x.baselineMae).length;
-  note.textContent='Walk-forward: '+(result.evaluatedCutoffs||0)+' historycznych punktów decyzyjnych, '+(result.skippedCutoffs||0)+' pominiętych. MAE niższe od baseline oznacza lepszy wynik. Model wygrywa z baseline w '+wins+'/3 horyzontów. To retrospektywna ocena algorytmu, nie zalecenie terapeutyczne.';
+  const best=horizons.map(x=>{const candidates=modelNames.filter(name=>name!=='persistence').map(name=>({name,mae:result.models?.[name]?.[String(x.minutes)]?.mae})).filter(v=>Number.isFinite(v.mae)).sort((a,b)=>a.mae-b.mae);return x.minutes+' min: '+(bestName(candidates[0]?.name)||'brak')}).join(' · ');
+  note.textContent='Walk-forward: '+(result.evaluatedCutoffs||0)+' punktów decyzyjnych co '+result.stepMinutes+' min. Najlepszy wariant: '+best+'. Wyniki historyczne nie gwarantują jakości przyszłych prognoz i nie służą do decyzji terapeutycznych.';
  }catch(error){
   setText('backtestRows','Test nie powiódł się: '+error.message);
   note.textContent='Nie udało się wykonać walidacji. Sprawdź połączenie z API i spróbuj ponownie.';

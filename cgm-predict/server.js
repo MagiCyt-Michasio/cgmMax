@@ -15,49 +15,56 @@ function linearFit(p){const mx=p.reduce((s,x)=>s+x.x,0)/p.length,my=p.reduce((s,
 function forecast(entries){const now=entries.at(-1),recent=entries.filter(e=>now.t-e.t<=45*60000);if(recent.length<4)return{available:false,reason:'Za mało świeżych punktów do prognozy.'};const x0=recent[0].t,fit=linearFit(recent.map(e=>({x:(e.t-x0)/60000,y:e.v}))),slope=Math.max(-5,Math.min(5,fit.slope)),residual=Math.sqrt(recent.reduce((s,e)=>s+(e.v-(fit.intercept+fit.slope*((e.t-x0)/60000)))**2,0)/recent.length),horizons=[15,30,45,60].map(minutes=>{const raw=now.v+slope*minutes,band=1.96*residual;return{minutes,value:Math.round(Math.max(20,Math.min(600,raw))),low:Math.round(Math.max(20,raw-band)),high:Math.round(Math.min(600,raw+band))};}),t70=slope<-.03?(now.v-70)/Math.abs(slope):null;return{available:true,current:now.v,slopePerMinute:Number(slope.toFixed(3)),horizons,residual:Number(residual.toFixed(1)),timeTo70:t70!==null&&t70>0&&t70<=120?Math.round(t70):null,method:'linear-trend-45m',confidence:recent.length>=8&&residual<15?'moderate':'low',sampleCount:recent.length};}
 
 function walkForwardBacktest(entries, options={}) {
- const horizons=options.horizons||[15,30,60], stepMinutes=Math.max(5,Math.min(60,options.stepMinutes||15));
- const minHistoryMinutes=options.minHistoryMinutes||60, maxSamples=options.maxSamples||1500;
- const results=Object.fromEntries(horizons.map(h=>[h,[]]));
- let evaluated=0,skipped=0;
- // Evaluate historical cutoffs only. Future rows are used solely as targets, never as model inputs.
+ const horizons=options.horizons||[15,30,60],stepMinutes=Math.max(5,Math.min(60,options.stepMinutes||15));
+ const maxSamples=options.maxSamples||1500, names=['linear45','damped45','linear20','persistence'];
+ const results=Object.fromEntries(names.map(name=>[name,Object.fromEntries(horizons.map(h=>[h,[]]))]));
+ let evaluated=0,skipped=0,lastCutoff=-Infinity;
  for(let i=0;i<entries.length;i++){
-  const cutoff=entries[i],history=entries.slice(0,i+1);
-  if(history.length<4){skipped++;continue;}
-  const recent=history.filter(e=>cutoff.t-e.t<=45*60000);
-  if(recent.length<4||history[0].t>cutoff.t-minHistoryMinutes*60000){skipped++;continue;}
-  const model=forecast(history);
-  if(!model.available){skipped++;continue;}
+  const cutoff=entries[i];
+  if(cutoff.t-lastCutoff<stepMinutes*60000)continue;
+  const history=entries.slice(0,i+1),recent45=history.filter(e=>cutoff.t-e.t<=45*60000),recent20=history.filter(e=>cutoff.t-e.t<=20*60000);
+  if(recent45.length<4||history[0].t>cutoff.t-60*60000){skipped++;continue;}
+  const fit45=linearFit(recent45.map(e=>({x:(e.t-recent45[0].t)/60000,y:e.v})));
+  const fit20=recent20.length>=3?linearFit(recent20.map(e=>({x:(e.t-recent20[0].t)/60000,y:e.v}))):fit45;
+  const slope45=Math.max(-5,Math.min(5,fit45.slope)),slope20=Math.max(-5,Math.min(5,fit20.slope));
+  const predictions={linear45:h=>cutoff.v+slope45*h,damped45:h=>cutoff.v+slope45*h*(h<=15?.7:h<=30?.45:.25),linear20:h=>cutoff.v+slope20*h,persistence:h=>cutoff.v};
   let used=false;
-  for(const h of horizons){
-   const target=entries.find(e=>e.t>=cutoff.t+h*60000 && e.t<=cutoff.t+(h+7)*60000);
+  for(const horizon of horizons){
+   const target=entries.find(e=>e.t>=cutoff.t+horizon*60000&&e.t<=cutoff.t+(horizon+7)*60000);
    if(!target)continue;
-   const estimate=model.horizons.find(x=>x.minutes===h);
-   if(!estimate)continue;
-   const error=estimate.value-target.v;
-   results[h].push({predicted:estimate.value,actual:target.v,error,absError:Math.abs(error),withinBand:target.v>=estimate.low&&target.v<=estimate.high,cutoff:cutoff.t,targetTime:target.t});
+   for(const name of names){
+    const predicted=Math.round(Math.max(20,Math.min(600,predictions[name](horizon))));
+    const error=predicted-target.v;
+    results[name][horizon].push({predicted,actual:target.v,error,absError:Math.abs(error),cutoff:cutoff.t});
+   }
    used=true;
   }
-  if(used)evaluated++;
+  if(used){evaluated++;lastCutoff=cutoff.t;}
   if(evaluated>=maxSamples)break;
  }
+ const models={};
+ for(const name of names){
+  models[name]={};
+  for(const horizon of horizons){
+   const a=results[name][horizon],n=a.length;
+   models[name][horizon]=n?{
+    samples:n,
+    mae:Number((a.reduce((sum,x)=>sum+x.absError,0)/n).toFixed(2)),
+    rmse:Number(Math.sqrt(a.reduce((sum,x)=>sum=>sum,0)/n).toFixed(2))
+   }:{samples:0,mae:null,rmse:null};
+   if(n){
+    models[name][horizon].rmse=Number(Math.sqrt(a.reduce((sum,x)=>sum+x.error*x.error,0)/n).toFixed(2));
+    models[name][horizon].bias=Number((a.reduce((sum,x)=>sum+x.error,0)/n).toFixed(2));
+   }
+  }
+ }
  const summary={};
- for(const h of horizons){
-  const a=results[h];
-  if(!a.length){summary[h]={samples:0,mae:null,rmse:null,bias:null,withinBandPercent:null,baselineMae:null};continue;}
-  const abs=a.map(x=>x.absError),sq=a.map(x=>x.error*x.error),errors=a.map(x=>x.error);
-  // Persistence baseline: predict that the value stays at the cutoff glucose.
-  const baseline=a.map((x)=>Math.abs(x.actual-x.predicted+x.error)); // equal to |cutoff - actual| after recovering cutoff below
-  const baselineErrors=a.map(x=>x.actual - x.predicted + x.error);
-  summary[h]={samples:a.length,mae:Number((abs.reduce((s,x)=>s+x,0)/a.length).toFixed(2)),rmse:Number(Math.sqrt(sq.reduce((s,x)=>s+x,0)/a.length).toFixed(2)),bias:Number((errors.reduce((s,x)=>s+x,0)/a.length).toFixed(2)),withinBandPercent:Number((a.filter(x=>x.withinBand).length/a.length*100).toFixed(1)),baselineMae:null};
+ for(const horizon of horizons){
+  const m=models.linear45[horizon],base=models.persistence[horizon];
+  summary[horizon]={...m,baselineMae:base.mae,baselineSamples:base.samples};
  }
- // Explicit no-lookahead persistence baseline computed at each cutoff.
- for(const h of horizons){
-  const a=results[h];
-  if(a.length){const mapByCutoff=new Map(entries.map(x=>[x.t,x.v]));const vals=a.map(x=>Math.abs(x.actual-mapByCutoff.get(x.cutoff))).filter(Number.isFinite);summary[h].baselineMae=vals.length?Number((vals.reduce((s,x)=>s+x,0)/vals.length).toFixed(2)):null;}
- }
- return {available:Object.values(summary).some(x=>x.samples>0),method:'walk-forward-linear-trend-v1',stepMinutes,horizons:summary,totalRows:entries.length,evaluatedCutoffs:evaluated,skippedCutoffs:skipped,notes:'Retrospective validation only; no future values are used as features. Targets use the first sample in the horizon window +0..7 minutes.'};
+ return {available:Object.values(summary).some(x=>x.samples>0),method:'walk-forward-model-tournament-v1',stepMinutes,horizons:summary,models,totalRows:entries.length,evaluatedCutoffs:evaluated,skippedCutoffs:skipped,notes:'All candidate models use only readings available at each historical cutoff. Persistence is the baseline. Targets are the first sample in the horizon window +0..7 minutes.'};
 }
-
 function historicalSimilarity(entries){const current=entries.slice(-6);if(current.length<6||entries.length<60)return{available:false,reason:'Za mało historii do porównania epizodów.'};const vector=current.map(e=>e.v),episodes=[];for(let i=30;i<entries.length-18;i++){const c=entries.slice(i-6,i);if(c.length!==6)continue;const gap=entries[i-1].t-entries[i-6].t;if(gap>50*60000||gap<15*60000)continue;const distance=Math.sqrt(c.reduce((s,e,j)=>s+(e.v-vector[j])**2,0)/6);if(distance<35){const f=entries.slice(i,i+12);episodes.push({distance,minimum:Math.min(...f.map(e=>e.v)),change:f.at(-1).v-c[5]});}}episodes.sort((a,b)=>a.distance-b.distance);const best=episodes.slice(0,20);if(best.length<5)return{available:false,reason:'Znaleziono mniej niż pięć podobnych epizodów.'};return{available:true,samples:best.length,similarHypoRate:Math.round(best.filter(e=>e.minimum<70).length/best.length*100),medianFutureChange:median(best.map(e=>e.change)),medianFutureMinimum:median(best.map(e=>e.minimum))};}
 function aggregate(entries){const v=entries.map(e=>e.v);if(!v.length)return{readings:0,mean:null,median:null,min:null,max:null,below70:null,range70to180:null,above180:null,sd:null};const mean=v.reduce((a,b)=>a+b,0)/v.length,variance=v.reduce((s,x)=>s+(x-mean)**2,0)/v.length;return{readings:v.length,mean:Math.round(mean),median:Math.round(median(v)),min:Math.min(...v),max:Math.max(...v),below70:Math.round(v.filter(x=>x<70).length/v.length*100),range70to180:Math.round(v.filter(x=>x>=70&&x<=180).length/v.length*100),above180:Math.round(v.filter(x=>x>180).length/v.length*100),sd:Math.round(Math.sqrt(variance))};}
 function dayProfile(entries){const a=Array.from({length:24},()=>({sum:0,count:0,low:0,high:0}));for(const e of entries){const s=a[new Date(e.t).getHours()];s.sum+=e.v;s.count++;if(e.v<70)s.low++;if(e.v>180)s.high++;}return a.map((s,h)=>({hour:h,mean:s.count?Math.round(s.sum/s.count):null,readings:s.count,below70:s.count?Math.round(s.low/s.count*100):null,above180:s.count?Math.round(s.high/s.count*100):null}));}
