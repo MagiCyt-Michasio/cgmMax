@@ -55,3 +55,17 @@ Statystyki pokazywały średnią 180, medianę 177, minimum 45, maksimum 375, TI
 
 ## Ograniczenia
 Nie ma jeszcze trenowanego ML, IOB/COB, indywidualnego profilu farmakodynamicznego, walk-forward backtestu ani walidacji klinicznej. Prognozy mogą być błędne. Nie używaj panelu do obliczania dawek insuliny ani do odkładania reakcji na alarmy CGM i ustalony plan postępowania.
+
+
+## Nowa karta 0.4: Test jakości prognozy (walk-forward)
+
+Naciśnij **Uruchom test**. Aplikacja bierze ostatnie 90 dni danych i odtwarza kolejne historyczne momenty:
+1. Wybiera konkretny punkt w przeszłości.
+2. Buduje prognozę tylko z odczytów dostępnych do tego momentu.
+3. Szuka rzeczywistego odczytu w okolicy horyzontu 15, 30 lub 60 minut.
+4. Porównuje prognozę z tym odczytem.
+5. Powtarza to dla następnych momentów i liczy błędy.
+
+**MAE** to średnia wielkość pomyłki w mg/dL — mniej znaczy lepiej. **RMSE** mocniej karze duże pomyłki. **Bias** pokazuje, czy prognoza przeciętnie zawyża lub zaniża wynik. **Baseline** to bardzo prosty przeciwnik: założenie, że glukoza pozostanie na ostatnim znanym poziomie. Jeśli model ma większy MAE niż baseline, jego trendowa prognoza nie poprawia tego prostego punktu odniesienia na badanym zbiorze.
+
+Wyniki są testem technicznym na historii, a nie dowodem bezpieczeństwa klinicznego. Brakujące lub nieregularne odczyty wpływają na liczbę prób. Obecna wersja nadal nie trenuje modelu ML.

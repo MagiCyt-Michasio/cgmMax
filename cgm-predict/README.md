@@ -1,30 +1,37 @@
-# CGM Predict 0.3 — 90-day analytics
+# CGM Predict 0.4 — Walk-forward validation
 
-- 7 / 30 / 90 day selectors control summary statistics, hourly profile, glucose ranges and data-quality metrics.
-- Period comparison chart displays mean glucose and TIR over 7 / 30 / 90 days on separate axes.
-- Long gaps are counted only inside the selected analysis period.
-- Doughnut chart has no misleading numeric axes.
-- Existing detailed history selectors (6h / 12h / 24h / 3d / 7d) remain available.
-- Dashboard guide: [CO JA WIDZĘ?](docs/CO_JA_WIDZE.md).
+Independent read-only Nightscout analytics PWA.
+
+## What's new in 0.4
+- Historical walk-forward evaluation of the current short-term trend estimator.
+- Forecast error metrics (MAE, RMSE, bias) at 15 / 30 / 60 minutes.
+- Comparison with a simple persistence baseline (assume glucose remains at the latest value).
+- Coverage of the current simple residual interval.
+- A dedicated dashboard panel to launch the backtest over the last 90 days.
+- Existing 7 / 30 / 90-day statistics, timeline and plots remain.
 
 ## Debian update
-
 ```bash
 cd ~/cgmMax
 git pull --ff-only origin main
 cd cgm-predict
 npm install
 ```
+Restart the CGM Predict process and reload the PWA. Existing local `.env` is preserved.
 
-Restart the CGM Predict process and reload the browser page. Existing local `.env` is preserved.
+## Walk-forward endpoint
+`GET /api/backtest?days=90&step=15`
 
-## API
-- `GET /api/health`
-- `GET /api/data?hours=24`
-- `GET /api/analytics?days=90`
-- `GET /api/predict`
-- `GET /api/metrics?days=90`
+The endpoint tests historical forecast cutoffs. At each cutoff it forms the forecast from the current and preceding readings only; subsequent readings are used only as evaluation targets. It reports:
+- **MAE** — mean absolute error in mg/dL; smaller is better.
+- **RMSE** — root mean square error; more sensitive to large misses.
+- **Bias** — signed average error; positive means forecasts tended to be above observed values.
+- **Within-band %** — share of target measurements inside the simple forecast interval.
+- **Baseline MAE** — error from a naive persistence estimate (hold the cutoff glucose constant).
 
-The TIR value is based on the share of readings, not a time-weighted reconstruction. The short-term forecast remains a linear trend baseline, not trained ML. Similar-episode matching remains heuristic. IOB/COB, profile-aware pharmacodynamics, walk-forward and clinical validation are not implemented.
+Targets use the first available point between the requested horizon and seven minutes after it. The evaluation is retrospective and can be affected by missing sensor points and irregular time intervals.
 
-CGM Predict is experimental analytics, not a medical device or dosing tool. Do not use predictions to calculate insulin doses or delay established CGM alarms and care plans.
+## Important limitations
+This does not train a new ML model. It evaluates the existing linear-trend baseline. Results are retrospective engineering metrics, not clinical validation or a guarantee of future performance. It does not yet model insulin-on-board, carbs-on-board, exercise or individualized insulin pharmacodynamics.
+
+CGM Predict is experimental analytics, not a medical device or dosing tool. Never use predictions to calculate insulin doses or delay CGM alarms and established care plans.
