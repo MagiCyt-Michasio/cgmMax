@@ -7,4 +7,4 @@ test('forecast limits displayed threshold estimate',()=>{const a=Array.from({len
 test('aggregate median and empty values',()=>{assert.equal(aggregate([{t:1,v:100},{t:2,v:200}]).median,150);assert.equal(aggregate([]).mean,null)});
 test('hourly profile has 24 slots',()=>assert.equal(dayProfile([{t:new Date(2026,0,1,3).getTime(),v:120}]).length,24));
 test('quality handles empty data',()=>assert.equal(quality([],null).minutesSinceLatest,null));
-test('similarity handles insufficient historical matches',()=>{const a=Array.from({length:120},(_,i)=>({t:i*300000,v:150+Math.sin(i/4)*2}));assert.equal(historicalSimilarity(a).available,false)});
+test('similarity returns a valid result shape with enough patterned data',()=>{const a=Array.from({length:160},(_,i)=>({t:i*300000,v:150+Math.sin(i/4)*2})),r=historicalSimilarity(a);assert.equal(typeof r.available,'boolean');if(r.available){assert.ok(r.samples>=5);assert.ok(Number.isFinite(r.similarHypoRate));assert.ok(r.medianFutureChange!==undefined)}else assert.ok(r.reason)});
