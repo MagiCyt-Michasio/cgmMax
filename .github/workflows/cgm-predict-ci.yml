@@ -1,0 +1,26 @@
+name: CGM Predict CI
+on:
+  push:
+    paths:
+      - 'cgm-predict/**'
+      - '.github/workflows/cgm-predict-ci.yml'
+  pull_request:
+    paths:
+      - 'cgm-predict/**'
+      - '.github/workflows/cgm-predict-ci.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cgm-predict
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cgm-predict/package-lock.json
+      - run: npm install
+      - run: npm test
+      - run: node --check server.js

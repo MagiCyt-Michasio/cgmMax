@@ -1,8 +1,8 @@
 {
   "name": "cgm-predict-nightscout",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Independent Nightscout-backed CGM prediction PWA",
+  "description": "Independent Nightscout analytics PWA",
   "main": "server.js",
   "scripts": {"start":"node server.js","test":"node --test","check:db":"node check-mongodb.js"},
   "engines": {"node": ">=20"},
