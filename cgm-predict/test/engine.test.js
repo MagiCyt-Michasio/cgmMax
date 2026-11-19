@@ -21,3 +21,5 @@ test('walk-forward does not evaluate a tiny dataset',()=>{
  const r=walkForwardBacktest(a);
  assert.equal(r.available,false);
 });
+
+test('server health route reports package version 0.4.0',()=>{const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync(require.resolve('../package.json'),'utf8'));assert.equal(pkg.version,'0.4.0');const src=fs.readFileSync(require.resolve('../server'),'utf8');assert.match(src,/version:'0\\.4\\.0'/);assert.match(src,/CGM Predict 0\\.4\\.0 listening/);});
