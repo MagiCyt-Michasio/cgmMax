@@ -45,7 +45,7 @@ function historicalSimilarity(entries) {
   const gap=entries[i-1].t-entries[i-6].t;
   if(gap>50*60000||gap<15*60000)continue;
   const distance=Math.sqrt(candidate.reduce((s,e,j)=>s+(e.v-vector[j])**2,0)/6);
-  if(distance<35)episodes.push({distance,minimum:Math.min(...entries.slice(i,i+12).map(e=>e.v)),drop:entries[i+11].v-candidate[5].v});
+  if(distance<35)episodes.push({distance,minimum:Math.min(...entries.slice(i,i+12).map(e=>e.v)),drop:entries[i+11].v-candidate[5]});
  }
  episodes.sort((a,b)=>a.distance-b.distance);
  const best=episodes.slice(0,20);
